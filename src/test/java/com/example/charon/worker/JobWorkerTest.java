@@ -2,7 +2,10 @@ package com.example.charon.worker;
 
 import com.example.charon.model.Job;
 import com.example.charon.model.JobStatus;
+import com.example.charon.model.Wallet;
+import com.example.charon.repository.AppliedIdempotencyKeyRepository;
 import com.example.charon.repository.JobRepository;
+import com.example.charon.repository.WalletRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,9 +35,17 @@ class JobWorkerTest {
     @Autowired
     private JobWorker jobWorker;
 
+    @Autowired
+    private WalletRepository walletRepository;
+
+    @Autowired
+    private AppliedIdempotencyKeyRepository appliedIdempotencyKeyRepository;
+
     @BeforeEach
     void setUp() {
         jobRepository.deleteAll();
+        walletRepository.deleteAll();
+        appliedIdempotencyKeyRepository.deleteAll();
     }
 
     @Test
@@ -141,5 +152,43 @@ class JobWorkerTest {
         Job afterFinalAttempt = jobRepository.findById(failingJob.getId()).orElseThrow();
         assertThat(afterFinalAttempt.getStatus()).isEqualTo(JobStatus.DEAD);
         assertThat(afterFinalAttempt.getAttempts()).isEqualTo(3);
+    }
+
+    @Test
+    void shouldNotDoubleChargeForSameIdempotencyKey() {
+        String idempotencyKey = "charge-req-999";
+        String userId = "alice";
+
+        // First Job
+        Job job1 = new Job();
+        job1.setPriority(1);
+        job1.setPayload("{\"task\":\"charge_wallet\", \"user_id\":\"" + userId + "\"}");
+        job1.setIdempotencyKey(idempotencyKey);
+        jobRepository.save(job1);
+
+        // Process first job
+        jobWorker.pollForJobs();
+
+        // Wallet should be created (1000 initial - 50 debit = 950)
+        Wallet wallet = walletRepository.findByUserId(userId).orElseThrow();
+        assertThat(wallet.getBalance()).isEqualTo(950);
+        assertThat(appliedIdempotencyKeyRepository.existsById(idempotencyKey)).isTrue();
+
+        // Second Job (Duplicate)
+        Job job2 = new Job();
+        job2.setPriority(1);
+        job2.setPayload("{\"task\":\"charge_wallet\", \"user_id\":\"" + userId + "\"}");
+        job2.setIdempotencyKey(idempotencyKey);
+        jobRepository.save(job2);
+
+        // Process second job
+        jobWorker.pollForJobs();
+
+        // Wallet should STILL be 950
+        Wallet walletAfter = walletRepository.findByUserId(userId).orElseThrow();
+        assertThat(walletAfter.getBalance()).isEqualTo(950);
+
+        Job updatedJob2 = jobRepository.findById(job2.getId()).orElseThrow();
+        assertThat(updatedJob2.getStatus()).isEqualTo(JobStatus.DONE); // Processed and marked done, but skipped debit
     }
 }
