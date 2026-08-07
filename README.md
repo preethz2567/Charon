@@ -2,6 +2,12 @@
 
 A job queue system built in Spring Boot and Postgres from scratch.
 
+## Milestone 7 Complete
+- Added `GET /jobs/queue/status` endpoint for live demo inspection.
+- The endpoint returns a JSON payload showing the aggregate counts for `PENDING` and `DEAD` jobs.
+- It also returns the count of `LEASED` jobs along with a detailed list of those currently in-flight (including their `lockedBy` and `lockedUntil` timestamps).
+- Added full test coverage for the inspection endpoint.
+
 ## Milestone 6 Complete
 - Added `applied_idempotency_keys` and `wallets` tables via a Flyway migration to support testing exactly-once processing guarantees.
 - Implemented `ChargeWalletHandler`, which debits a wallet balance.
