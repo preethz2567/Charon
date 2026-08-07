@@ -1,89 +1,109 @@
 # Charon
 
-A job queue system built in Spring Boot and Postgres from scratch.
+A durable, exactly-once, Postgres-backed job queue system built in Spring Boot from scratch (no Celery, Sidekiq, or Quartz).
 
-## Milestone 7 Complete
-- Added `GET /jobs/queue/status` endpoint for live demo inspection.
-- The endpoint returns a JSON payload showing the aggregate counts for `PENDING` and `DEAD` jobs.
-- It also returns the count of `LEASED` jobs along with a detailed list of those currently in-flight (including their `lockedBy` and `lockedUntil` timestamps).
-- Added full test coverage for the inspection endpoint.
+## Features & Guarantees
+- **Atomic Claims**: Concurrent workers will never claim the same job thanks to `SELECT ... FOR UPDATE SKIP LOCKED`.
+- **Crash Recovery**: If a worker crashes mid-job, the job's lease expires and is automatically reclaimed.
+- **Exponential Backoff**: Failing jobs are automatically retried with exponential backoff (`2^attempts + jitter`) up to a configurable max attempt count.
+- **Dead-Letter Queue**: Jobs that consistently fail are moved to a dead-letter queue where they can be inspected and manually replayed.
+- **Exactly-Once Idempotency**: Jobs can be keyed with an `idempotency_key` which guarantees that the underlying work (e.g., charging a wallet) only ever happens once, regardless of retries or network drops.
 
-## Milestone 6 Complete
-- Added `applied_idempotency_keys` and `wallets` tables via a Flyway migration to support testing exactly-once processing guarantees.
-- Implemented `ChargeWalletHandler`, which debits a wallet balance.
-- Guaranteed idempotency by having the handler check if the job's `idempotency_key` exists in `applied_idempotency_keys` before applying the debit. Both the check, the debit, and the key insertion happen in a single `@Transactional` method.
-- If a duplicate job runs with the same key, it is skipped and marked `DONE` without charging the wallet a second time.
-- Added `shouldNotDoubleChargeForSameIdempotencyKey` test to prove that queuing two jobs with the identical idempotency key correctly drops the wallet balance exactly once.
+---
 
-## Milestone 5 Complete
-- Replaced the `FAILED` terminal status with `DEAD`.
-- When a job exceeds `max_attempts`, it is permanently moved to the Dead Letter Queue (`status=DEAD`) with the `last_error` recorded.
-- Added `GET /dead-letters` endpoint to view all dead jobs.
-- Added `POST /dead-letters/{id}/replay` endpoint to resurrect a dead job (resets `attempts=0`, clears `last_error`, and queues it back as `PENDING`).
-- Added tests to verify the replay endpoint works and guards against non-DEAD jobs being replayed.
+## How to Run and Demo
 
-## Milestone 4 Complete
-- Added exception handling to the `JobWorker`.
-- Implemented exponential backoff for failed jobs (`2^attempts + jitter` seconds).
-- Failed jobs have their `attempts` incremented, `last_error` populated, and are returned to `PENDING` status for retry until they reach `max_attempts`.
-- Once a job reaches `max_attempts`, it is permanently marked as `FAILED`.
-- The worker logs the computed delay and current attempt counts so you can monitor the backoff.
-- Added tests to prove that retry logic correctly computes backoff and eventually marks persistently failing jobs as `FAILED`.
+### 1. Prerequisites
+- **Java 21**
+- **Maven**
+- **Docker** (to run PostgreSQL via Testcontainers or manually)
 
-## Milestone 3 Complete
-- Added a `reclaimStaleJobs` scheduled task running every 5 seconds.
-- Automatically reclaims jobs that are stuck in `LEASED` state past their `lockedUntil` timestamp (e.g. if a worker crashes).
-- Safely resets the job's status to `PENDING` and clears the lock fields so it can be picked up by the next available worker.
-- Added tests to prove that stale jobs are properly reclaimed while active jobs are left untouched.
+### 2. Start PostgreSQL
+If you want to run the app manually against a database, spin up Postgres using Docker:
+```bash
+docker run --name charon-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=charon -p 5432:5432 -d postgres:16-alpine
+```
 
-### Simulating a crash
-1. Start the application (`mvn spring-boot:run`).
-2. Enqueue a job via `POST /jobs`.
-3. Watch the logs. When the worker prints `Worker {id} claimed job {id}...`, hit `Ctrl+C` immediately before it prints `done` 2 seconds later.
-4. Restart the application.
-5. Within 5 seconds, the `JobReclaimer` will revert the job to `PENDING`, and the worker will pick it up and process it again.
+Make sure your `src/main/resources/application.properties` (or your environment variables) point to `jdbc:postgresql://localhost:5432/charon` with the correct credentials. Spring Boot Flyway will automatically migrate the schema on startup.
 
-## Milestone 2 Complete
-- Added a `@Scheduled` background worker that polls every 1 second.
-- Implemented an atomic claim mechanism using `SELECT ... FOR UPDATE SKIP LOCKED` natively via Postgres.
-- The worker claims the highest-priority, earliest-due job, marking it `LEASED`.
-- Implemented a fake job processor that logs the claim, sleeps for 2 seconds, and marks the job as `DONE`.
-- Added integration tests to verify the polling and claiming logic.
-
-## Milestone 1 Complete
-- Initialized Spring Boot skeleton with Web, Data JPA, Postgres, Flyway, and Validation.
-- Replaced Gradle with Maven.
-- Created `jobs` table in Postgres via Flyway migration.
-- Added `Job` entity, `JobStatus` enum, and `JobRepository`.
-- Added a basic `POST /jobs` endpoint to enqueue jobs.
-
-### Prerequisites
-- Java 21
-- Maven
-- Docker (for Testcontainers)
-
-### How to Run
-Ensure you have a PostgreSQL database available, configure your `application.properties` with the database credentials, and start the application:
+### 3. Start the Application
+Run the Spring Boot application using Maven:
 ```bash
 mvn spring-boot:run
 ```
 
-### How to Test
-The integration tests use Testcontainers to spin up a real PostgreSQL instance automatically. Make sure Docker is running on your machine, then execute:
-```bash
-mvn test
-```
+*(Note: If you run tests, Testcontainers will automatically spin up its own ephemeral Postgres instance without needing the manual docker command).*
 
-### Endpoints
-**Enqueue a Job**
-`POST /jobs`
-```json
-{
-  "priority": 10,
-  "runAt": "2026-01-01T10:00:00Z",
-  "payload": "{\"task\": \"send_email\"}",
-  "idempotencyKey": "email-123",
-  "maxAttempts": 5
-}
-```
-Returns a `201 Created` with the saved Job details.
+---
+
+## Step-by-Step Demo Script
+
+### A. Show Enqueue & Processing
+1. Open a terminal and check the queue status:
+   ```bash
+   curl http://localhost:8080/jobs/queue/status
+   ```
+   *Expected: Counts are 0.*
+2. Enqueue a basic job:
+   ```bash
+   curl -X POST http://localhost:8080/jobs \
+        -H "Content-Type: application/json" \
+        -d '{"priority":10, "payload":"{\"task\":\"say_hello\"}"}'
+   ```
+3. Look at your Spring Boot logs. You will see:
+   `Worker {id} claimed job 1...` followed by `done` 2 seconds later.
+
+### B. Show Crash Recovery (Reclaim)
+1. Stop your Spring Boot app (Ctrl+C).
+2. Start it again.
+3. Quickly enqueue a job:
+   ```bash
+   curl -X POST http://localhost:8080/jobs \
+        -H "Content-Type: application/json" \
+        -d '{"priority":10, "payload":"{\"task\":\"say_hello\"}"}'
+   ```
+4. Immediately hit **Ctrl+C** to kill the Spring Boot app as soon as you see `Worker {id} claimed job...`, but *before* you see `done`.
+5. Start the app again (`mvn spring-boot:run`).
+6. Wait 5 seconds. The `JobReclaimer` will detect the orphaned lease, revert it to `PENDING`, and the worker will instantly pick it up and process it to completion.
+
+### C. Show Retry & Exponential Backoff
+1. Enqueue a job specifically designed to fail:
+   ```bash
+   curl -X POST http://localhost:8080/jobs \
+        -H "Content-Type: application/json" \
+        -d '{"priority":10, "payload":"{\"task\":\"test\", \"fail\":true}"}'
+   ```
+2. Watch the logs. The worker will attempt the job, catch the exception, and log:
+   `Job {id} failed. Computed delay: Xs (2^1 + Ys jitter). Next run_at: ... (Attempt 1/3)`
+3. It will wait, try again, back off further, and finally reach attempt 3.
+
+### D. Show Dead-Letter Queue & Replay
+1. Once the failing job from the previous step reaches attempt 3, the logs will show it is marked as `DEAD`.
+2. Inspect the Dead-Letter Queue:
+   ```bash
+   curl http://localhost:8080/jobs/dead-letters
+   ```
+   *Expected: You will see your failed job in the JSON list with `lastError` populated.*
+3. Replay the dead job (assuming its ID is 2):
+   ```bash
+   curl -X POST http://localhost:8080/jobs/dead-letters/2/replay
+   ```
+4. The job is instantly moved back to `PENDING`, attempts are reset to 0, and the worker will pick it up to try again!
+
+### E. Show Exactly-Once Idempotency
+1. We have a special `charge_wallet` task that deducts money and relies on an idempotency key.
+2. Enqueue the charge job with a unique key:
+   ```bash
+   curl -X POST http://localhost:8080/jobs \
+        -H "Content-Type: application/json" \
+        -d '{"priority":1, "idempotencyKey":"charge-555", "payload":"{\"task\":\"charge_wallet\", \"user_id\":\"alice\"}"}'
+   ```
+3. Check the logs: `Successfully debited 50 from user alice and recorded idempotency key charge-555...`
+4. Enqueue the **exact same request** again:
+   ```bash
+   curl -X POST http://localhost:8080/jobs \
+        -H "Content-Type: application/json" \
+        -d '{"priority":1, "idempotencyKey":"charge-555", "payload":"{\"task\":\"charge_wallet\", \"user_id\":\"alice\"}"}'
+   ```
+5. Check the logs: `Idempotency key charge-555 already applied. Skipping debit for Job...`
+6. The job is marked `DONE`, but the side-effect (wallet debit) was safely bypassed.
