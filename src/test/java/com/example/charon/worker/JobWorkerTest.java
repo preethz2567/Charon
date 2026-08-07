@@ -17,6 +17,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.OffsetDateTime;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -190,5 +194,51 @@ class JobWorkerTest {
 
         Job updatedJob2 = jobRepository.findById(job2.getId()).orElseThrow();
         assertThat(updatedJob2.getStatus()).isEqualTo(JobStatus.DONE); // Processed and marked done, but skipped debit
+    }
+
+    @Test
+    void shouldNotClaimSameJobConcurrently() throws InterruptedException {
+        // We add only 1 job
+        Job job = new Job();
+        job.setPriority(1);
+        job.setPayload("{\"task\":\"concurrent_test\"}");
+        jobRepository.save(job);
+
+        int numberOfThreads = 5;
+        ExecutorService executorService = Executors.newFixedThreadPool(numberOfThreads);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch endLatch = new CountDownLatch(numberOfThreads);
+
+        AtomicInteger jobsClaimed = new AtomicInteger(0);
+
+        // We launch 5 threads that will all try to claim jobs concurrently
+        for (int i = 0; i < numberOfThreads; i++) {
+            executorService.submit(() -> {
+                try {
+                    startLatch.await(); // wait for all threads to be ready
+                    jobWorker.pollForJobs(); // each poll claims 1 job
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    endLatch.countDown();
+                }
+            });
+        }
+
+        // Release the hounds
+        startLatch.countDown();
+        
+        // Wait for all threads to finish their poll attempts
+        endLatch.await();
+        executorService.shutdown();
+
+        // Exactly 1 thread should have successfully claimed and processed the job
+        // The job should be DONE and no other jobs should have been affected
+        Job processedJob = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(processedJob.getStatus()).isEqualTo(JobStatus.DONE);
+        
+        // A direct DB count to ensure only 1 job exists and it's done
+        long doneCount = jobRepository.countByStatus(JobStatus.DONE);
+        assertThat(doneCount).isEqualTo(1);
     }
 }
