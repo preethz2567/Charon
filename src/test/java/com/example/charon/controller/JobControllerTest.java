@@ -76,4 +76,54 @@ class JobControllerTest {
                 .content(payload))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test
+    void shouldListDeadLetters() throws Exception {
+        Job deadJob = new Job();
+        deadJob.setStatus(JobStatus.DEAD);
+        deadJob.setPayload("{}");
+        deadJob.setPriority(1);
+        jobRepository.save(deadJob);
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/dead-letters"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(deadJob.getId()))
+                .andExpect(jsonPath("$[0].status").value("DEAD"));
+    }
+
+    @Test
+    void shouldReplayDeadLetter() throws Exception {
+        Job deadJob = new Job();
+        deadJob.setStatus(JobStatus.DEAD);
+        deadJob.setPayload("{}");
+        deadJob.setPriority(1);
+        deadJob.setAttempts(3);
+        deadJob.setLastError("Failed permanently");
+        deadJob = jobRepository.save(deadJob);
+
+        mockMvc.perform(post("/dead-letters/" + deadJob.getId() + "/replay"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(deadJob.getId()))
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.attempts").value(0))
+                .andExpect(jsonPath("$.lastError").doesNotExist());
+
+        // Verify in DB
+        Job updatedJob = jobRepository.findById(deadJob.getId()).orElseThrow();
+        assertThat(updatedJob.getStatus()).isEqualTo(JobStatus.PENDING);
+        assertThat(updatedJob.getAttempts()).isEqualTo(0);
+        assertThat(updatedJob.getLastError()).isNull();
+    }
+
+    @Test
+    void shouldFailReplayForNonDeadJob() throws Exception {
+        Job pendingJob = new Job();
+        pendingJob.setStatus(JobStatus.PENDING);
+        pendingJob.setPayload("{}");
+        pendingJob.setPriority(1);
+        pendingJob = jobRepository.save(pendingJob);
+
+        mockMvc.perform(post("/dead-letters/" + pendingJob.getId() + "/replay"))
+                .andExpect(status().isBadRequest());
+    }
 }
