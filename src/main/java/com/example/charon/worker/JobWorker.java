@@ -65,4 +65,14 @@ public class JobWorker {
             }
         });
     }
+
+    @Scheduled(fixedDelay = 5000)
+    public void reclaimStaleJobs() {
+        Integer reclaimedCount = transactionTemplate.execute(status -> 
+            jobRepository.reclaimStaleJobs(OffsetDateTime.now())
+        );
+        if (reclaimedCount != null && reclaimedCount > 0) {
+            log.info("Worker {} reclaimed {} stale job(s)", workerId, reclaimedCount);
+        }
+    }
 }
