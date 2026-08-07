@@ -2,6 +2,13 @@
 
 A job queue system built in Spring Boot and Postgres from scratch.
 
+## Milestone 5 Complete
+- Replaced the `FAILED` terminal status with `DEAD`.
+- When a job exceeds `max_attempts`, it is permanently moved to the Dead Letter Queue (`status=DEAD`) with the `last_error` recorded.
+- Added `GET /dead-letters` endpoint to view all dead jobs.
+- Added `POST /dead-letters/{id}/replay` endpoint to resurrect a dead job (resets `attempts=0`, clears `last_error`, and queues it back as `PENDING`).
+- Added tests to verify the replay endpoint works and guards against non-DEAD jobs being replayed.
+
 ## Milestone 4 Complete
 - Added exception handling to the `JobWorker`.
 - Implemented exponential backoff for failed jobs (`2^attempts + jitter` seconds).
