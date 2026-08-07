@@ -75,4 +75,39 @@ class JobWorkerTest {
         Job updatedJob1 = jobRepository.findById(job1.getId()).orElseThrow();
         assertThat(updatedJob1.getStatus()).isEqualTo(JobStatus.PENDING);
     }
+
+    @Test
+    void shouldReclaimStaleLeasedJobs() {
+        // Create a job that was leased but the lock expired
+        Job staleJob = new Job();
+        staleJob.setStatus(JobStatus.LEASED);
+        staleJob.setLockedBy("dead-worker");
+        staleJob.setLockedUntil(OffsetDateTime.now().minusSeconds(1));
+        staleJob.setPayload("{\"task\":\"stale\"}");
+        staleJob.setIdempotencyKey("stale-1");
+        jobRepository.save(staleJob);
+
+        // Create a job that is leased but still active
+        Job activeJob = new Job();
+        activeJob.setStatus(JobStatus.LEASED);
+        activeJob.setLockedBy("active-worker");
+        activeJob.setLockedUntil(OffsetDateTime.now().plusSeconds(30));
+        activeJob.setPayload("{\"task\":\"active\"}");
+        activeJob.setIdempotencyKey("active-1");
+        jobRepository.save(activeJob);
+
+        // Trigger the reclaimer
+        jobWorker.reclaimStaleJobs();
+
+        // The stale job should be PENDING again
+        Job reclaimedJob = jobRepository.findById(staleJob.getId()).orElseThrow();
+        assertThat(reclaimedJob.getStatus()).isEqualTo(JobStatus.PENDING);
+        assertThat(reclaimedJob.getLockedBy()).isNull();
+        assertThat(reclaimedJob.getLockedUntil()).isNull();
+
+        // The active job should still be LEASED
+        Job untouchedJob = jobRepository.findById(activeJob.getId()).orElseThrow();
+        assertThat(untouchedJob.getStatus()).isEqualTo(JobStatus.LEASED);
+        assertThat(untouchedJob.getLockedBy()).isEqualTo("active-worker");
+    }
 }
