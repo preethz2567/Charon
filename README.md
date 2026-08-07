@@ -2,6 +2,13 @@
 
 A job queue system built in Spring Boot and Postgres from scratch.
 
+## Milestone 2 Complete
+- Added a `@Scheduled` background worker that polls every 1 second.
+- Implemented an atomic claim mechanism using `SELECT ... FOR UPDATE SKIP LOCKED` natively via Postgres.
+- The worker claims the highest-priority, earliest-due job, marking it `LEASED`.
+- Implemented a fake job processor that logs the claim, sleeps for 2 seconds, and marks the job as `DONE`.
+- Added integration tests to verify the polling and claiming logic.
+
 ## Milestone 1 Complete
 - Initialized Spring Boot skeleton with Web, Data JPA, Postgres, Flyway, and Validation.
 - Replaced Gradle with Maven.
