@@ -22,4 +22,6 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     int reclaimStaleJobs(@Param("now") OffsetDateTime now);
 
     List<Job> findByStatus(com.example.charon.model.JobStatus status);
+
+    long countByStatus(com.example.charon.model.JobStatus status);
 }

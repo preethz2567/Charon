@@ -1,6 +1,8 @@
 package com.example.charon.controller;
 
 import com.example.charon.dto.EnqueueJobRequest;
+import com.example.charon.dto.LeasedJobDetail;
+import com.example.charon.dto.QueueStatusResponse;
 import com.example.charon.model.Job;
 import com.example.charon.model.JobStatus;
 import com.example.charon.repository.JobRepository;
@@ -10,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/jobs")
@@ -69,5 +72,25 @@ public class JobController {
         job.setLastError(null);
 
         return jobRepository.save(job);
+    }
+
+    @GetMapping("/queue/status")
+    public QueueStatusResponse getQueueStatus() {
+        QueueStatusResponse response = new QueueStatusResponse();
+        
+        long pendingCount = jobRepository.countByStatus(JobStatus.PENDING);
+        long deadCount = jobRepository.countByStatus(JobStatus.DEAD);
+        
+        List<Job> leasedJobs = jobRepository.findByStatus(JobStatus.LEASED);
+        
+        response.setPendingCount(pendingCount);
+        response.setDeadCount(deadCount);
+        response.setLeasedCount(leasedJobs.size());
+        
+        response.setLeasedJobs(leasedJobs.stream()
+                .map(j -> new LeasedJobDetail(j.getId(), j.getLockedBy(), j.getLockedUntil()))
+                .collect(Collectors.toList()));
+                
+        return response;
     }
 }

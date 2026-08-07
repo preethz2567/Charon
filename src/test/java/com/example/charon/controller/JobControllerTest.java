@@ -126,4 +126,34 @@ class JobControllerTest {
         mockMvc.perform(post("/dead-letters/" + pendingJob.getId() + "/replay"))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test
+    void shouldGetQueueStatus() throws Exception {
+        jobRepository.deleteAll();
+
+        // 2 Pending
+        Job p1 = new Job(); p1.setStatus(JobStatus.PENDING); p1.setPayload("{}"); jobRepository.save(p1);
+        Job p2 = new Job(); p2.setStatus(JobStatus.PENDING); p2.setPayload("{}"); jobRepository.save(p2);
+
+        // 1 Leased
+        Job l1 = new Job(); 
+        l1.setStatus(JobStatus.LEASED); 
+        l1.setPayload("{}"); 
+        l1.setLockedBy("worker-1");
+        l1.setLockedUntil(OffsetDateTime.now().plusMinutes(5));
+        jobRepository.save(l1);
+
+        // 3 Dead
+        Job d1 = new Job(); d1.setStatus(JobStatus.DEAD); d1.setPayload("{}"); jobRepository.save(d1);
+        Job d2 = new Job(); d2.setStatus(JobStatus.DEAD); d2.setPayload("{}"); jobRepository.save(d2);
+        Job d3 = new Job(); d3.setStatus(JobStatus.DEAD); d3.setPayload("{}"); jobRepository.save(d3);
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/jobs/queue/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pendingCount").value(2))
+                .andExpect(jsonPath("$.deadCount").value(3))
+                .andExpect(jsonPath("$.leasedCount").value(1))
+                .andExpect(jsonPath("$.leasedJobs[0].lockedBy").value("worker-1"))
+                .andExpect(jsonPath("$.leasedJobs[0].lockedUntil").exists());
+    }
 }
