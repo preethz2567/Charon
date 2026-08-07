@@ -110,4 +110,36 @@ class JobWorkerTest {
         assertThat(untouchedJob.getStatus()).isEqualTo(JobStatus.LEASED);
         assertThat(untouchedJob.getLockedBy()).isEqualTo("active-worker");
     }
+
+    @Test
+    void shouldRetryWithBackoffAndFailEventually() {
+        // Job with payload causing failure, 0 attempts
+        Job failingJob = new Job();
+        failingJob.setPriority(5);
+        failingJob.setRunAt(OffsetDateTime.now().minusMinutes(1));
+        failingJob.setPayload("{\"task\":\"test\", \"fail\":true}");
+        failingJob.setIdempotencyKey("fail-1");
+        jobRepository.save(failingJob);
+
+        // First poll: fails, attempt 1, backoff calculated
+        jobWorker.pollForJobs();
+
+        Job afterFirstAttempt = jobRepository.findById(failingJob.getId()).orElseThrow();
+        assertThat(afterFirstAttempt.getStatus()).isEqualTo(JobStatus.PENDING);
+        assertThat(afterFirstAttempt.getAttempts()).isEqualTo(1);
+        assertThat(afterFirstAttempt.getLastError()).contains("Simulated job failure");
+        assertThat(afterFirstAttempt.getRunAt()).isAfter(OffsetDateTime.now());
+
+        // Fast-forward runAt to now and set attempts to maxAttempts - 1 to test FAILED transition
+        afterFirstAttempt.setRunAt(OffsetDateTime.now().minusMinutes(1));
+        afterFirstAttempt.setAttempts(2); // assuming maxAttempts = 3
+        jobRepository.save(afterFirstAttempt);
+
+        // Second poll: reaches max attempts (3)
+        jobWorker.pollForJobs();
+
+        Job afterFinalAttempt = jobRepository.findById(failingJob.getId()).orElseThrow();
+        assertThat(afterFinalAttempt.getStatus()).isEqualTo(JobStatus.FAILED);
+        assertThat(afterFinalAttempt.getAttempts()).isEqualTo(3);
+    }
 }
