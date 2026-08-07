@@ -2,6 +2,19 @@
 
 A job queue system built in Spring Boot and Postgres from scratch.
 
+## Milestone 3 Complete
+- Added a `reclaimStaleJobs` scheduled task running every 5 seconds.
+- Automatically reclaims jobs that are stuck in `LEASED` state past their `lockedUntil` timestamp (e.g. if a worker crashes).
+- Safely resets the job's status to `PENDING` and clears the lock fields so it can be picked up by the next available worker.
+- Added tests to prove that stale jobs are properly reclaimed while active jobs are left untouched.
+
+### Simulating a crash
+1. Start the application (`mvn spring-boot:run`).
+2. Enqueue a job via `POST /jobs`.
+3. Watch the logs. When the worker prints `Worker {id} claimed job {id}...`, hit `Ctrl+C` immediately before it prints `done` 2 seconds later.
+4. Restart the application.
+5. Within 5 seconds, the `JobReclaimer` will revert the job to `PENDING`, and the worker will pick it up and process it again.
+
 ## Milestone 2 Complete
 - Added a `@Scheduled` background worker that polls every 1 second.
 - Implemented an atomic claim mechanism using `SELECT ... FOR UPDATE SKIP LOCKED` natively via Postgres.
