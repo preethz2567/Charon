@@ -50,6 +50,9 @@ public class JobWorker {
             try {
                 // Fake job handler
                 Thread.sleep(2000);
+                if (job.getPayload().contains("\"fail\":true")) {
+                    throw new RuntimeException("Simulated job failure");
+                }
                 System.out.println("done");
                 
                 // Mark as done
@@ -59,9 +62,37 @@ public class JobWorker {
                     job.setLockedUntil(null);
                     return jobRepository.save(job);
                 });
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.error("Worker {} interrupted while processing job {}", workerId, job.getId());
+            } catch (Exception e) {
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                    log.error("Worker {} interrupted while processing job {}", workerId, job.getId());
+                    return;
+                }
+
+                transactionTemplate.execute(status -> {
+                    int attempts = job.getAttempts() + 1;
+                    job.setAttempts(attempts);
+                    job.setLastError(e.getMessage());
+                    job.setLockedBy(null);
+                    job.setLockedUntil(null);
+
+                    if (attempts >= job.getMaxAttempts()) {
+                        job.setStatus(JobStatus.FAILED);
+                        log.warn("Job {} reached max attempts ({}). Marked as FAILED.", job.getId(), job.getMaxAttempts());
+                    } else {
+                        job.setStatus(JobStatus.PENDING);
+                        
+                        // Backoff: 2^attempts + jitter
+                        long delaySeconds = (long) Math.pow(2, attempts);
+                        long jitter = java.util.concurrent.ThreadLocalRandom.current().nextLong(1, 5);
+                        long totalDelay = delaySeconds + jitter;
+                        
+                        job.setRunAt(OffsetDateTime.now().plusSeconds(totalDelay));
+                        log.info("Job {} failed. Computed delay: {}s (2^{} + {}s jitter). Next run_at: {}. (Attempt {}/{})", 
+                                job.getId(), totalDelay, attempts, jitter, job.getRunAt(), attempts, job.getMaxAttempts());
+                    }
+                    return jobRepository.save(job);
+                });
             }
         });
     }
