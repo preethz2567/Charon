@@ -2,6 +2,13 @@
 
 A job queue system built in Spring Boot and Postgres from scratch.
 
+## Milestone 6 Complete
+- Added `applied_idempotency_keys` and `wallets` tables via a Flyway migration to support testing exactly-once processing guarantees.
+- Implemented `ChargeWalletHandler`, which debits a wallet balance.
+- Guaranteed idempotency by having the handler check if the job's `idempotency_key` exists in `applied_idempotency_keys` before applying the debit. Both the check, the debit, and the key insertion happen in a single `@Transactional` method.
+- If a duplicate job runs with the same key, it is skipped and marked `DONE` without charging the wallet a second time.
+- Added `shouldNotDoubleChargeForSameIdempotencyKey` test to prove that queuing two jobs with the identical idempotency key correctly drops the wallet balance exactly once.
+
 ## Milestone 5 Complete
 - Replaced the `FAILED` terminal status with `DEAD`.
 - When a job exceeds `max_attempts`, it is permanently moved to the Dead Letter Queue (`status=DEAD`) with the `last_error` recorded.
