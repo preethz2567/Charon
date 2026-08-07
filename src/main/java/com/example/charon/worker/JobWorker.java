@@ -20,11 +20,13 @@ public class JobWorker {
 
     private final JobRepository jobRepository;
     private final TransactionTemplate transactionTemplate;
+    private final ChargeWalletHandler chargeWalletHandler;
     private final String workerId;
 
-    public JobWorker(JobRepository jobRepository, TransactionTemplate transactionTemplate) {
+    public JobWorker(JobRepository jobRepository, TransactionTemplate transactionTemplate, ChargeWalletHandler chargeWalletHandler) {
         this.jobRepository = jobRepository;
         this.transactionTemplate = transactionTemplate;
+        this.chargeWalletHandler = chargeWalletHandler;
         this.workerId = UUID.randomUUID().toString();
     }
 
@@ -48,11 +50,24 @@ public class JobWorker {
             log.info("Worker {} claimed job {}: {}", workerId, job.getId(), job.getPayload());
             
             try {
-                // Fake job handler
-                Thread.sleep(2000);
                 if (job.getPayload().contains("\"fail\":true")) {
                     throw new RuntimeException("Simulated job failure");
                 }
+                
+                if (job.getPayload().contains("\"task\":\"charge_wallet\"")) {
+                    // Extract simplistic values for testing
+                    String userId = "test_user";
+                    int amount = 50;
+                    if (job.getPayload().contains("\"user_id\"")) {
+                        // extremely naive parse for the test
+                        userId = job.getPayload().split("\"user_id\":\"")[1].split("\"")[0];
+                    }
+                    chargeWalletHandler.handle(job, userId, amount);
+                } else {
+                    // Fake job handler
+                    Thread.sleep(2000);
+                }
+                
                 System.out.println("done");
                 
                 // Mark as done
