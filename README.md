@@ -2,6 +2,14 @@
 
 A job queue system built in Spring Boot and Postgres from scratch.
 
+## Milestone 4 Complete
+- Added exception handling to the `JobWorker`.
+- Implemented exponential backoff for failed jobs (`2^attempts + jitter` seconds).
+- Failed jobs have their `attempts` incremented, `last_error` populated, and are returned to `PENDING` status for retry until they reach `max_attempts`.
+- Once a job reaches `max_attempts`, it is permanently marked as `FAILED`.
+- The worker logs the computed delay and current attempt counts so you can monitor the backoff.
+- Added tests to prove that retry logic correctly computes backoff and eventually marks persistently failing jobs as `FAILED`.
+
 ## Milestone 3 Complete
 - Added a `reclaimStaleJobs` scheduled task running every 5 seconds.
 - Automatically reclaims jobs that are stuck in `LEASED` state past their `lockedUntil` timestamp (e.g. if a worker crashes).
