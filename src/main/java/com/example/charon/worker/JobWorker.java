@@ -77,8 +77,8 @@ public class JobWorker {
                     job.setLockedUntil(null);
 
                     if (attempts >= job.getMaxAttempts()) {
-                        job.setStatus(JobStatus.FAILED);
-                        log.warn("Job {} reached max attempts ({}). Marked as FAILED.", job.getId(), job.getMaxAttempts());
+                        job.setStatus(JobStatus.DEAD);
+                        log.warn("Job {} reached max attempts ({}). Marked as DEAD.", job.getId(), job.getMaxAttempts());
                     } else {
                         job.setStatus(JobStatus.PENDING);
                         

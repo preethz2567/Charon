@@ -139,7 +139,7 @@ class JobWorkerTest {
         jobWorker.pollForJobs();
 
         Job afterFinalAttempt = jobRepository.findById(failingJob.getId()).orElseThrow();
-        assertThat(afterFinalAttempt.getStatus()).isEqualTo(JobStatus.FAILED);
+        assertThat(afterFinalAttempt.getStatus()).isEqualTo(JobStatus.DEAD);
         assertThat(afterFinalAttempt.getAttempts()).isEqualTo(3);
     }
 }
