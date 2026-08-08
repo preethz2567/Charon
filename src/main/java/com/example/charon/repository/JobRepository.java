@@ -14,7 +14,7 @@ import java.util.Optional;
 @Repository
 public interface JobRepository extends JpaRepository<Job, Long> {
 
-    @Query(value = "SELECT j.* FROM jobs j LEFT JOIN jobs p ON j.parent_job_id = p.id WHERE j.status = 'PENDING' AND j.run_at <= :now AND (j.parent_job_id IS NULL OR p.status = 'DONE') ORDER BY j.priority DESC, j.run_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    @Query(value = "SELECT j.* FROM jobs j LEFT JOIN jobs p ON j.parent_job_id = p.id WHERE j.status = 'PENDING' AND j.run_at <= :now AND (j.parent_job_id IS NULL OR p.status = 'DONE') ORDER BY j.priority DESC, j.run_at ASC LIMIT 1 FOR UPDATE OF j SKIP LOCKED", nativeQuery = true)
     Optional<Job> claimNextJob(@Param("now") OffsetDateTime now);
 
     @Modifying
