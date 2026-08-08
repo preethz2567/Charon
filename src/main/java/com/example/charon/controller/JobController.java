@@ -16,6 +16,7 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/jobs")
+@CrossOrigin(origins = "*") // NOTE: Wildcard CORS is for local development/demo purposes only!
 public class JobController {
 
     private final JobRepository jobRepository;
