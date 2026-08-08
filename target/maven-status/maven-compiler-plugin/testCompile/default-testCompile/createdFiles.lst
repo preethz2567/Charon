@@ -1,0 +1,3 @@
+com\example\charon\CharonApplicationTests.class
+com\example\charon\controller\JobControllerTest.class
+com\example\charon\worker\JobWorkerTest.class

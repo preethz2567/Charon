@@ -48,6 +48,9 @@ public class Job {
     @Column(name = "last_error", columnDefinition = "text")
     private String lastError;
 
+    @Column(name = "parent_job_id")
+    private Long parentJobId;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -144,6 +147,14 @@ public class Job {
 
     public void setLastError(String lastError) {
         this.lastError = lastError;
+    }
+
+    public Long getParentJobId() {
+        return parentJobId;
+    }
+
+    public void setParentJobId(Long parentJobId) {
+        this.parentJobId = parentJobId;
     }
 
     public OffsetDateTime getCreatedAt() {

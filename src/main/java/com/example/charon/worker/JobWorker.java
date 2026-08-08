@@ -114,11 +114,18 @@ public class JobWorker {
 
     @Scheduled(fixedDelay = 5000)
     public void reclaimStaleJobs() {
-        Integer reclaimedCount = transactionTemplate.execute(status -> 
-            jobRepository.reclaimStaleJobs(OffsetDateTime.now())
-        );
-        if (reclaimedCount != null && reclaimedCount > 0) {
-            log.info("Worker {} reclaimed {} stale job(s)", workerId, reclaimedCount);
-        }
+        transactionTemplate.execute(status -> {
+            int orphanedCount = jobRepository.failOrphanedJobs();
+            if (orphanedCount > 0) {
+                log.info("Failed {} orphaned dependent jobs whose parents died.", orphanedCount);
+            }
+
+            OffsetDateTime now = OffsetDateTime.now();
+            int reclaimedCount = jobRepository.reclaimStaleJobs(now);
+            if (reclaimedCount > 0) {
+                log.info("Reclaimed {} stale leased jobs.", reclaimedCount);
+            }
+            return null;
+        });
     }
 }

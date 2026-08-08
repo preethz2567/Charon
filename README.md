@@ -2,6 +2,12 @@
 
 A durable, exactly-once, Postgres-backed job queue system built in Spring Boot from scratch (no Celery, Sidekiq, or Quartz).
 
+## Milestone 9 Complete (Stretch Goal: Dependencies)
+- Added a `parent_job_id` column to jobs via Flyway.
+- Dependent jobs (`parent_job_id` IS NOT NULL) wait in `PENDING` state and are strictly excluded from polling until their parent job completes (`DONE`).
+- If a parent job fails permanently (`DEAD`), a background reclaimer aggressively marks all orphaned dependent jobs as `DEAD` with the reason `"Parent job died"`, preventing them from waiting infinitely.
+- Tests included to prove the dependency blocking logic and the cascading dead-letter logic.
+
 ## Features & Guarantees
 - **Atomic Claims**: Concurrent workers will never claim the same job thanks to `SELECT ... FOR UPDATE SKIP LOCKED`.
 - **Crash Recovery**: If a worker crashes mid-job, the job's lease expires and is automatically reclaimed.

@@ -42,11 +42,13 @@ public class JobController {
         } else {
             job.setRunAt(OffsetDateTime.now());
         }
-        if (request.getIdempotencyKey() != null) {
-            job.setIdempotencyKey(request.getIdempotencyKey());
-        }
+        job.setPayload(request.getPayload());
+        job.setIdempotencyKey(request.getIdempotencyKey());
         if (request.getMaxAttempts() != null) {
             job.setMaxAttempts(request.getMaxAttempts());
+        }
+        if (request.getParentJobId() != null) {
+            job.setParentJobId(request.getParentJobId());
         }
 
         return jobRepository.save(job);

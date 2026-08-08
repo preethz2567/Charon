@@ -8,6 +8,7 @@ public class EnqueueJobRequest {
     private String payload;
     private String idempotencyKey;
     private Integer maxAttempts;
+    private Long parentJobId;
 
     public Integer getPriority() {
         return priority;
@@ -47,5 +48,13 @@ public class EnqueueJobRequest {
 
     public void setMaxAttempts(Integer maxAttempts) {
         this.maxAttempts = maxAttempts;
+    }
+
+    public Long getParentJobId() {
+        return parentJobId;
+    }
+
+    public void setParentJobId(Long parentJobId) {
+        this.parentJobId = parentJobId;
     }
 }

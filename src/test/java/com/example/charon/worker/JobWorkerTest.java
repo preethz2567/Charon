@@ -241,4 +241,58 @@ class JobWorkerTest {
         long doneCount = jobRepository.countByStatus(JobStatus.DONE);
         assertThat(doneCount).isEqualTo(1);
     }
+
+    @Test
+    void shouldNotRunDependentJobUntilParentCompletes() {
+        Job parent = new Job();
+        parent.setPriority(1);
+        parent.setPayload("{\"task\":\"parent_job\"}");
+        parent = jobRepository.save(parent);
+
+        Job dependent = new Job();
+        dependent.setPriority(10); // higher priority, but shouldn't run
+        dependent.setPayload("{\"task\":\"dependent_job\"}");
+        dependent.setParentJobId(parent.getId());
+        dependent = jobRepository.save(dependent);
+
+        // Poll 1: Should claim parent, despite dependent having higher priority
+        jobWorker.pollForJobs();
+        Job updatedParent = jobRepository.findById(parent.getId()).orElseThrow();
+        assertThat(updatedParent.getStatus()).isEqualTo(JobStatus.DONE);
+
+        Job updatedDependent = jobRepository.findById(dependent.getId()).orElseThrow();
+        assertThat(updatedDependent.getStatus()).isEqualTo(JobStatus.PENDING); // Not run yet
+
+        // Poll 2: Now that parent is done, dependent should be claimed
+        jobWorker.pollForJobs();
+        updatedDependent = jobRepository.findById(dependent.getId()).orElseThrow();
+        assertThat(updatedDependent.getStatus()).isEqualTo(JobStatus.DONE);
+    }
+
+    @Test
+    void shouldFailDependentJobIfParentDies() {
+        Job parent = new Job();
+        parent.setPriority(1);
+        parent.setPayload("{\"task\":\"test\", \"fail\":true}"); // Will fail and die
+        parent.setMaxAttempts(1);
+        parent = jobRepository.save(parent);
+
+        Job dependent = new Job();
+        dependent.setPriority(10);
+        dependent.setPayload("{\"task\":\"dependent_job\"}");
+        dependent.setParentJobId(parent.getId());
+        dependent = jobRepository.save(dependent);
+
+        // Poll: runs parent, fails, moves to DEAD
+        jobWorker.pollForJobs();
+        Job updatedParent = jobRepository.findById(parent.getId()).orElseThrow();
+        assertThat(updatedParent.getStatus()).isEqualTo(JobStatus.DEAD);
+
+        // Trigger reclaimer loop to fail orphaned jobs
+        jobWorker.reclaimStaleJobs();
+
+        Job updatedDependent = jobRepository.findById(dependent.getId()).orElseThrow();
+        assertThat(updatedDependent.getStatus()).isEqualTo(JobStatus.DEAD);
+        assertThat(updatedDependent.getLastError()).isEqualTo("Parent job died");
+    }
 }
