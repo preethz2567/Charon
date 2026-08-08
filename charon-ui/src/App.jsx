@@ -29,15 +29,18 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null;
 };
 
-const DeltaPill = ({ current, previous }) => {
-  if (previous === undefined || previous === null) return <span className="delta-pill neutral">No history</span>;
+const DeltaPill = ({ current, previous, isErrorType }) => {
+  if (previous === undefined || previous === null) return <span className="delta-pill">No history</span>;
   const diff = current - previous;
-  if (diff === 0) return <span className="delta-pill neutral">No change</span>;
-  if (diff > 0) return <span className="delta-pill positive">+{diff} since last check</span>;
+  if (diff === 0) return <span className="delta-pill">No change</span>;
+  
+  if (diff > 0) {
+    if (isErrorType) return <span className="delta-pill danger">+{diff} since last check</span>;
+    return <span className="delta-pill positive">+{diff} since last check</span>;
+  }
   return <span className="delta-pill">{diff} since last check</span>;
 };
 
-// Custom Active Dot for line chart
 const renderActiveDot = (props) => {
   const { cx, cy, stroke } = props;
   return (
@@ -61,20 +64,18 @@ function App() {
   
   const [replayingIds, setReplayingIds] = useState(new Set());
   const [successIds, setSuccessIds] = useState(new Set());
+  const [errorIds, setErrorIds] = useState(new Set());
 
-  // Form states
   const [payload, setPayload] = useState('{"task": "send_email"}');
   const [priority, setPriority] = useState(5);
   const [delaySecs, setDelaySecs] = useState(0);
   const [seeding, setSeeding] = useState(false);
 
-  // Fast timer for live lease countdown & clock updates
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // API Polling every 2 seconds
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -97,9 +98,7 @@ function App() {
         setHistory(prev => {
           const newData = {
             time: timeStr,
-            pending: statusData.pendingCount,
-            inFlight: statusData.leasedCount,
-            dead: statusData.deadCount
+            total: statusData.pendingCount + statusData.leasedCount + statusData.deadCount
           };
           const updated = [...prev, newData];
           if (updated.length > MAX_HISTORY) return updated.slice(updated.length - MAX_HISTORY);
@@ -118,6 +117,7 @@ function App() {
 
   const handleReplay = async (id) => {
     setReplayingIds(prev => new Set(prev).add(id));
+    setErrorIds(prev => { const next = new Set(prev); next.delete(id); return next; });
     try {
       const res = await fetch(`${API_BASE}/dead-letters/${id}/replay`, { method: 'POST' });
       if (res.ok) {
@@ -126,10 +126,16 @@ function App() {
           setSuccessIds(prev => { const next = new Set(prev); next.delete(id); return next; });
           setReplayingIds(prev => { const next = new Set(prev); next.delete(id); return next; });
         }, 1500);
+      } else {
+        throw new Error("Failed to replay");
       }
     } catch (err) {
       console.error("Replay failed", err);
+      setErrorIds(prev => new Set(prev).add(id));
       setReplayingIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+      setTimeout(() => {
+        setErrorIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+      }, 3000);
     }
   };
 
@@ -172,12 +178,6 @@ function App() {
     return Math.max(0, diff);
   };
 
-  const getTimerPillClass = (seconds) => {
-    if (seconds > 10) return 'safe';
-    if (seconds > 3) return 'warn';
-    return 'danger';
-  };
-
   const previousPoll = history.length > 1 ? history[history.length - 2] : null;
 
   return (
@@ -185,7 +185,7 @@ function App() {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="brand">
-          <Database size={24} style={{ color: 'var(--accent-blue)' }} />
+          <Database size={24} style={{ color: 'var(--accent-teal)' }} />
           Charon
         </div>
         <ul className="nav-menu">
@@ -235,25 +235,25 @@ function App() {
             )}
 
             <div className="kpi-grid">
-              <div className="solid-card kpi-card pending">
+              <div className="solid-card kpi-card">
                 <div className="kpi-header">
                   <div className="kpi-title">Pending Jobs</div>
                   <Clock className="kpi-icon" size={20} />
                 </div>
                 <div className="kpi-body">
                   <div className="kpi-value">{apiConnected ? queueStatus.pendingCount : '-'}</div>
-                  {apiConnected && <DeltaPill current={queueStatus.pendingCount} previous={previousPoll?.pending} />}
+                  {apiConnected && <DeltaPill current={queueStatus.pendingCount} previous={previousPoll?.total} isErrorType={false} />}
                 </div>
               </div>
 
-              <div className="solid-card kpi-card inflight">
+              <div className="solid-card kpi-card">
                 <div className="kpi-header">
                   <div className="kpi-title">In-Flight</div>
                   <Zap className="kpi-icon" size={20} />
                 </div>
                 <div className="kpi-body">
                   <div className="kpi-value">{apiConnected ? queueStatus.leasedCount : '-'}</div>
-                  {apiConnected && <DeltaPill current={queueStatus.leasedCount} previous={previousPoll?.inFlight} />}
+                  {apiConnected && <DeltaPill current={queueStatus.leasedCount} previous={previousPoll?.total} isErrorType={false} />}
                 </div>
               </div>
 
@@ -264,7 +264,7 @@ function App() {
                 </div>
                 <div className="kpi-body">
                   <div className="kpi-value">{apiConnected ? queueStatus.deadCount : '-'}</div>
-                  {apiConnected && <DeltaPill current={queueStatus.deadCount} previous={previousPoll?.dead} />}
+                  {apiConnected && <DeltaPill current={queueStatus.deadCount} previous={previousPoll?.total} isErrorType={true} />}
                 </div>
               </div>
             </div>
@@ -272,23 +272,15 @@ function App() {
             {/* Chart Section */}
             <div className="solid-card chart-container">
               <div className="chart-header">
-                <h2 className="chart-title">Queue Volume (Real-time)</h2>
+                <h2 className="chart-title">Total Queue Volume</h2>
                 <div className="section-caption">Live counts from the last few status checks — updates automatically.</div>
               </div>
               <ResponsiveContainer width="100%" height="75%">
                 <AreaChart data={history} margin={{ top: 10, right: 10, left: -30, bottom: 0 }}>
                   <defs>
-                    <linearGradient id="colorPending" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--accent-amber)" stopOpacity={0.15}/>
-                      <stop offset="100%" stopColor="var(--accent-amber)" stopOpacity={0}/>
-                    </linearGradient>
-                    <linearGradient id="colorInflight" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--accent-blue)" stopOpacity={0.15}/>
-                      <stop offset="100%" stopColor="var(--accent-blue)" stopOpacity={0}/>
-                    </linearGradient>
-                    <linearGradient id="colorDead" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--accent-red)" stopOpacity={0.15}/>
-                      <stop offset="100%" stopColor="var(--accent-red)" stopOpacity={0}/>
+                    <linearGradient id="colorTeal" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--accent-teal)" stopOpacity={0.12}/>
+                      <stop offset="100%" stopColor="var(--accent-teal)" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.04)" />
@@ -302,9 +294,7 @@ function App() {
                     tickCount={4}
                   />
                   <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="pending" name="Pending" stroke="var(--accent-amber)" strokeWidth={2} fill="url(#colorPending)" activeDot={renderActiveDot} />
-                  <Area type="monotone" dataKey="inFlight" name="In-Flight" stroke="var(--accent-blue)" strokeWidth={2} fill="url(#colorInflight)" activeDot={renderActiveDot} />
-                  <Area type="monotone" dataKey="dead" name="Dead" stroke="var(--accent-red)" strokeWidth={2} fill="url(#colorDead)" activeDot={renderActiveDot} />
+                  <Area type="monotone" dataKey="total" name="Total Jobs" stroke="var(--accent-teal)" strokeWidth={2} fill="url(#colorTeal)" activeDot={renderActiveDot} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -316,7 +306,7 @@ function App() {
                 <div className="solid-card">
                   <div className="section-header-wrap">
                     <h2 className="section-header">
-                      <Plus size={20} style={{ opacity: 0.8 }} /> Enqueue Job
+                      <Plus size={20} className="kpi-icon" /> Enqueue Job
                     </h2>
                     <div className="section-caption">Submit a real job to the queue — it'll appear below once claimed by a worker.</div>
                   </div>
@@ -346,7 +336,7 @@ function App() {
                 <div className="solid-card">
                   <div className="section-header-wrap">
                     <h2 className="section-header">
-                      <Play size={20} style={{ opacity: 0.8 }} /> Seed Demo
+                      <Play size={20} className="kpi-icon" /> Seed Demo
                     </h2>
                     <div className="section-caption" style={{ marginBottom: '16px' }}>
                       Fires several real jobs at once, including one designed to fail, to show retries and dead-letter recovery live.
@@ -365,7 +355,7 @@ function App() {
                 <div className="solid-card" style={{ display: 'flex', flexDirection: 'column' }}>
                   <div className="section-header-wrap">
                     <h2 className="section-header">
-                      <Server size={20} style={{ opacity: 0.8 }} /> Active Leased Jobs
+                      <Server size={20} className="kpi-icon" /> Active Leased Jobs
                     </h2>
                   </div>
                   {(!apiConnected || queueStatus.leasedJobs.length === 0) ? (
@@ -385,7 +375,7 @@ function App() {
                                 <span className="badge"><User size={10} /> {job.lockedBy.split('-')[0]}</span>
                               </span>
                             </div>
-                            <div className={`timer-pill ${getTimerPillClass(secs)}`}>
+                            <div className="timer-pill">
                               <Clock size={14} /> {secs}s
                             </div>
                           </div>
@@ -398,7 +388,7 @@ function App() {
                 <div className="solid-card" style={{ display: 'flex', flexDirection: 'column' }}>
                   <div className="section-header-wrap">
                     <h2 className="section-header">
-                      <Trash2 size={20} style={{ opacity: 0.8 }} /> Dead Letter Queue
+                      <Trash2 size={20} className="kpi-icon" /> Dead Letter Queue
                     </h2>
                   </div>
                   {(!apiConnected || deadLetters.length === 0) ? (
@@ -411,10 +401,12 @@ function App() {
                       {deadLetters.map(job => {
                         const isReplaying = replayingIds.has(job.id);
                         const isSuccess = successIds.has(job.id);
+                        const isError = errorIds.has(job.id);
+                        
                         return (
                           <div className="list-item" key={job.id}>
                             <div className="item-main">
-                              <span className="item-id">#{job.id}</span>
+                              <span className="item-id" style={{ color: 'var(--accent-red)' }}>#{job.id}</span>
                               <span className="item-meta" title={job.payload}>{job.payload}</span>
                               {job.lastError && (
                                 <span className="item-error" title={job.lastError}>
@@ -424,12 +416,18 @@ function App() {
                               )}
                             </div>
                             <button 
-                              className="btn"
-                              style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem' }}
+                              className="btn btn-secondary"
+                              style={{ 
+                                padding: '0.4rem 0.75rem', 
+                                fontSize: '0.75rem',
+                                color: isError ? 'var(--accent-red)' : undefined,
+                                borderColor: isError ? 'var(--accent-red)' : undefined
+                              }}
                               onClick={() => handleReplay(job.id)}
                               disabled={isReplaying || isSuccess}
                             >
-                              {isSuccess ? <><CheckCircle size={14} className="success-text"/> Queued!</> 
+                              {isError ? <><AlertCircle size={14} /> Failed</> 
+                              : isSuccess ? <><CheckCircle size={14} style={{ color: 'var(--text-primary)' }}/> Queued!</> 
                               : isReplaying ? <><RefreshCw size={14} className="spinner" /> Replaying</> 
                               : <><RefreshCw size={14} /> Replay</>}
                             </button>
